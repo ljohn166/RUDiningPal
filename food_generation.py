@@ -3,12 +3,27 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 import os
+import json
+from typing import List, Dict
 
-def processData(location):
-    load_dotenv()
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    client = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-pro')
 
+def generate_prompt(menu_items: List[str], preferences: List[str]) -> str:
+    """Generate the prompt for Gemini API"""
+    
+    # Convert preferences to dietary constraints
+    constraints = ""
+    if "vegetarian" in preferences:
+        constraints += "- Exclude meat, poultry, and fish\n"
+    if "vegan" in preferences:
+        constraints += "- Exclude all animal products (meat, dairy, eggs)\n"
+    if "gluten-free" in preferences:
+        constraints += "- Avoid items with wheat, barley, rye\n"
+    if "high-protein" in preferences:
+        constraints += "- Prioritize high-protein items in all combinations\n"
+    if "low-carb" in preferences:
+        constraints += "- Minimize bread, pasta, rice, and starchy items\n"
 
     prompt = (
     "You are a creative dining assistant for Rutgers University dining halls. Your task is to generate appealing meal combinations from available menu items."
@@ -38,20 +53,46 @@ def processData(location):
     "]"
     "Be creative but practical - these should be meals students would actually want to eat!"
     )
+    return prompt
 
-
-    reddit_file = client.files.upload(file="output.txt")
-
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents = [reddit_file, prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema= list[Recommendation],
-            thinking_config=types.ThinkingConfig(thinking_budget=-1)
-        ),
-    )
-
-    client.close()
-    return response.text 
+def generate_combinations(menu_items: List[str], preferences: List[str]) -> List[Dict]:
+    """Generate meal combinations using Gemini API"""
+    
+    try:
+        prompt = generate_prompt(menu_items, preferences)
+        
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                'temperature': 0.7,
+                'top_p': 0.9,
+                'max_output_tokens': 2048,
+            }
+        )
+        
+        # Parse JSON response
+        response_text = response.text.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        
+        combinations = json.loads(response_text.strip())
+        
+        return combinations
+    
+    except Exception as e:
+        print(f"Error generating combinations: {e}")
+        # Return fallback combinations
+        return [
+            {
+                "name": "Error Loading Combinations",
+                "items": menu_items[:3],
+                "category": "Fallback",
+                "description": "Could not generate AI combinations. Here are some menu items."
+            }
+        ]
